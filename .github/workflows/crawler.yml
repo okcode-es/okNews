@@ -46,6 +46,8 @@ concurrency:
 permissions:
   contents: read
   actions: write
+  pages: write
+  id-token: write
 
 jobs:
   crawl:
@@ -58,40 +60,6 @@ jobs:
         with:
           fetch-depth: 1
           clean: true
-
-      - name: Check Expiration
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          WORKFLOW_FILE="crawler.yml"
-          API_URL="repos/${{ github.repository }}/actions/workflows/$WORKFLOW_FILE/runs"
-
-          TOTAL=$(gh api "$API_URL" --jq '.total_count')
-          if [ -z "$TOTAL" ] || [ "$TOTAL" -eq 0 ]; then
-            echo "No previous runs found, skipping expiration check"
-            exit 0
-          fi
-
-          LAST_PAGE=$(( (TOTAL + 99) / 100 ))
-          FIRST_RUN_DATE=$(gh api "$API_URL?per_page=100&page=$LAST_PAGE" --jq '.workflow_runs[-1].created_at')
-
-          if [ -n "$FIRST_RUN_DATE" ]; then
-            CURRENT_TIMESTAMP=$(date +%s)
-            FIRST_RUN_TIMESTAMP=$(date -d "$FIRST_RUN_DATE" +%s)
-            DIFF_SECONDS=$((CURRENT_TIMESTAMP - FIRST_RUN_TIMESTAMP))
-            LIMIT_SECONDS=604800
-
-            if [ $DIFF_SECONDS -gt $LIMIT_SECONDS ]; then
-              echo "⚠️ 试用期已结束，请运行 'Check In' 签到续期"
-              echo "⚠️ Trial expired. Run 'Check In' to renew."
-              gh workflow disable "$WORKFLOW_FILE"
-              exit 1
-            else
-              DAYS_LEFT=$(( (LIMIT_SECONDS - DIFF_SECONDS) / 86400 ))
-              echo "✅ 试用期剩余 ${DAYS_LEFT} 天，到期前请运行 'Check In' 签到续期"
-              echo "✅ Trial: ${DAYS_LEFT} days left. Run 'Check In' before expiry to renew."
-            fi
-          fi
 
 
       # --------------------------------------------------------------------------------
@@ -213,3 +181,46 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy cloudflare_dist --project-name=${{ secrets.CLOUDFLARE_PROJECT_NAME }}
+
+      # --------------------------------------------------------------------------------
+      # 📄 GITHUB PAGES / 准备 GitHub Pages 静态资源
+      # --------------------------------------------------------------------------------
+      - name: Prepare GitHub Pages assets
+        if: success()
+        run: |
+          if [ ! -f index.html ]; then
+            echo "❌ 未找到 index.html，请确认爬虫已生成网页报告"
+            exit 1
+          fi
+          rm -rf pages_dist
+          mkdir -p pages_dist
+          cp index.html pages_dist/index.html
+          if [ -d docs ]; then
+            cp -r docs pages_dist/docs
+          fi
+          touch pages_dist/.nojekyll
+
+      - name: Upload GitHub Pages artifact
+        if: success()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_dist
+
+  deploy-pages:
+    needs: crawl
+    if: success()
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+

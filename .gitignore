@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Output and Databases
+output/
+*.db
+*.sqlite
+
+# Pages dist
+pages_dist/
+cloudflare_dist/
+
+# OS files
+.DS_Store
+Thumbs.db
